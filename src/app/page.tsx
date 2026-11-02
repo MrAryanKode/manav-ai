@@ -2,55 +2,94 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
-  ArrowUp,
   AudioLines,
   BrainCircuit,
-  CircleStop,
-  Command,
-  Cpu,
-  Database,
+  Check,
+  Copy,
   Globe2,
-  Layers3,
-  Menu,
   Mic,
-  Monitor,
+  MicOff,
+  Plus,
   Radio,
-  Search,
-  Settings2,
+  Send,
   Shield,
   Sparkles,
-  Terminal,
+  Square,
   Volume2,
+  VolumeX,
   Wifi,
-  X,
-  Zap,
-  MessageSquare,
 } from "lucide-react";
 
+type Role = "user" | "model";
+
 type Message = {
-  role: "user" | "model";
+  role: Role;
   content: string;
+  language?: string;
 };
 
-type SpeechResult = {
+type Language =
+  | "auto"
+  | "en"
+  | "hi"
+  | "hinglish"
+  | "gu"
+  | "ta"
+  | "te"
+  | "bn"
+  | "mr"
+  | "fr"
+  | "es"
+  | "de";
+
+const API = "http://127.0.0.1:8000";
+
+const languageNames: Record<string, string> = {
+  en: "English",
+  hi: "Hindi",
+  hinglish: "Hinglish",
+  gu: "Gujarati",
+  ta: "Tamil",
+  te: "Telugu",
+  bn: "Bengali",
+  mr: "Marathi",
+  fr: "French",
+  es: "Spanish",
+  de: "German",
+};
+
+const supportedLanguages: { value: Language; label: string }[] = [
+  { value: "auto", label: "Automatic detection" },
+  { value: "en", label: "English" },
+  { value: "hi", label: "Hindi" },
+  { value: "hinglish", label: "Hinglish" },
+  { value: "gu", label: "Gujarati" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "bn", label: "Bengali" },
+  { value: "mr", label: "Marathi" },
+  { value: "fr", label: "French" },
+  { value: "es", label: "Spanish" },
+  { value: "de", label: "German" },
+];
+
+type RecognitionResult = {
   isFinal: boolean;
-  [index: number]: { transcript: string };
+  0: { transcript: string };
 };
 
-type SpeechEvent = {
+type RecognitionEvent = {
   resultIndex: number;
-  results: ArrayLike<SpeechResult>;
+  results: ArrayLike<RecognitionResult>;
 };
 
 type Recognition = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
-  onresult: ((event: SpeechEvent) => void) | null;
+  onresult: ((event: RecognitionEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
@@ -60,88 +99,44 @@ type Recognition = {
 
 type RecognitionConstructor = new () => Recognition;
 
-const agents = [
-  { name: "RESEARCH", detail: "Information intelligence", icon: Search },
-  { name: "CODING", detail: "Development systems", icon: Terminal },
-  { name: "BROWSER", detail: "Web intelligence", icon: Globe2 },
-  { name: "SYSTEM", detail: "Local operations", icon: Monitor },
-];
-
-const suggestions = [
-  "Explain artificial intelligence",
-  "Help me build a project",
-  "Write Python code",
-  "Research something for me",
-];
-
-const navItems = [
-  { name: "COMMAND", icon: Command },
-  { name: "CONVERSATIONS", icon: MessageSquare },
-  { name: "AGENTS", icon: Layers3 },
-  { name: "MEMORY", icon: BrainCircuit },
-  { name: "SYSTEM", icon: Settings2 },
-];
-
-const bars = Array.from({ length: 50 }, (_, i) => i);
-
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [command, setCommand] = useState("");
   const [sending, setSending] = useState(false);
-  const [backendOnline, setBackendOnline] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [voiceMode, setVoiceMode] = useState<"natural" | "jarvis">("jarvis");
+  const [online, setOnline] = useState(false);
+  const [language, setLanguage] = useState<Language>("auto");
+  const [lastLanguage, setLastLanguage] = useState("en");
   const [listening, setListening] = useState(false);
   const [wakeEnabled, setWakeEnabled] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [googleVoice, setGoogleVoice] = useState(true);
   const [notice, setNotice] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState("COMMAND");
-  const [lastResponseTime, setLastResponseTime] = useState<number | null>(null);
-  const [voiceStatus, setVoiceStatus] = useState("SYSTEM STANDBY");
+  const [latency, setLatency] = useState<number | null>(null);
 
+  const messagesRef = useRef<Message[]>([]);
   const sendingRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<Recognition | null>(null);
-  const restartRecognitionRef = useRef(false);
   const wakeEnabledRef = useRef(false);
-  const listeningModeRef = useRef<"wake" | "push" | null>(null);
+  const restartWakeRef = useRef(false);
   const wakeArmedRef = useRef(false);
-  const speechBufferRef = useRef("");
-  const speechStoppedRef = useRef(false);
-  const messagesRef = useRef<Message[]>([]);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
-    chatEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "end",
-    });
-  }, [messages, sending]);
+  }, [messages]);
 
-  // Check the existing FastAPI health endpoint.
   useEffect(() => {
     let active = true;
 
     const check = async () => {
       try {
-        const response = await fetch("http://127.0.0.1:8000/health", {
+        const response = await fetch(`${API}/health`, {
           cache: "no-store",
         });
-
-        const data = await response.json();
-
-        if (active) {
-          setBackendOnline(response.ok && data.status === "healthy");
-          setChecking(false);
-        }
+        if (active) setOnline(response.ok);
       } catch {
-        if (active) {
-          setBackendOnline(false);
-          setChecking(false);
-        }
+        if (active) setOnline(false);
       }
     };
 
@@ -156,114 +151,126 @@ export default function Home() {
 
   const notify = useCallback((text: string) => {
     setNotice(text);
-
-    if (noticeTimerRef.current) {
-      clearTimeout(noticeTimerRef.current);
-    }
-
-    noticeTimerRef.current = setTimeout(() => {
-      setNotice("");
-    }, 3500);
+    window.setTimeout(() => setNotice(""), 3500);
   }, []);
 
-  // Speech synthesis for each completed sentence.
-  const speakSentence = useCallback((text: string) => {
-    if (speechStoppedRef.current || !text.trim()) return;
-    if (!("speechSynthesis" in window)) return;
+  const stopVoice = useCallback(() => {
+    window.speechSynthesis?.cancel();
+    audioRef.current?.pause();
+    audioRef.current = null;
+    setSpeaking(false);
+  }, []);
 
-    const clean = text
-      .replace(/```[\s\S]*?```/g, "I have included a code example in the chat.")
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\*\*(.*?)\*\*/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/https?:\/\/\S+/g, "link")
-      .trim();
-
-    if (!clean) return;
-
-    const hindi = /[\u0900-\u097F]/.test(clean);
-    const voices = window.speechSynthesis.getVoices();
-
-    const languageVoices = voices.filter((voice) =>
-      voice.lang.toLowerCase().startsWith(hindi ? "hi" : "en")
-    );
-
-    const preferredNames =
-      voiceMode === "jarvis"
-        ? ["daniel", "george", "david", "mark", "guy", "thomas"]
-        : ["ravi", "david", "alex", "daniel", "guy"];
-
-    const selected =
-      languageVoices.find((voice) =>
-        preferredNames.some((name) =>
-          voice.name.toLowerCase().includes(name)
-        )
-      ) ?? languageVoices[0];
-
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = hindi ? "hi-IN" : "en-IN";
-
-    if (selected) {
-      utterance.voice = selected;
-      utterance.lang = selected.lang;
-    }
-
-    utterance.rate = voiceMode === "jarvis" ? 0.91 : 1.02;
-    utterance.pitch = voiceMode === "jarvis" ? 0.78 : 1.1;
-    utterance.volume = 1;
-
-    utterance.onstart = () => setSpeaking(true);
-
-    utterance.onend = () => {
-      if (!window.speechSynthesis.speaking) {
-        setSpeaking(false);
-      }
-    };
-
-    utterance.onerror = () => setSpeaking(false);
-
-    window.speechSynthesis.speak(utterance);
-  }, [voiceMode]);
-
-  // Divide streamed text into complete sentences.
-  const processSpeech = useCallback(
-    (text: string, flush = false) => {
-      speechBufferRef.current += text;
-
-      while (true) {
-        const match = speechBufferRef.current.match(
-          /^([\s\S]*?[.!?।])(?:\s+|$)/
-        );
-
-        if (!match) break;
-
-        speechBufferRef.current = speechBufferRef.current.slice(
-          match[0].length
-        );
-
-        speakSentence(match[1].trim());
+  const browserSpeak = useCallback(
+    (text: string, lang: string) => {
+      if (!("speechSynthesis" in window)) {
+        notify("No supported speech engine is available.");
+        return;
       }
 
-      if (flush && speechBufferRef.current.trim()) {
-        speakSentence(speechBufferRef.current.trim());
-        speechBufferRef.current = "";
-      }
+      const locale: Record<string, string> = {
+        en: "en-IN",
+        hi: "hi-IN",
+        hinglish: "hi-IN",
+        gu: "gu-IN",
+        ta: "ta-IN",
+        te: "te-IN",
+        bn: "bn-IN",
+        mr: "mr-IN",
+        fr: "fr-FR",
+        es: "es-ES",
+        de: "de-DE",
+      };
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = locale[lang] || "en-IN";
+      utterance.rate = 0.96;
+      utterance.pitch = 0.92;
+
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voices.find(
+        (item) =>
+          item.lang.toLowerCase().startsWith(
+            utterance.lang.slice(0, 2).toLowerCase(),
+          ),
+      );
+
+      if (voice) utterance.voice = voice;
+
+      utterance.onstart = () => setSpeaking(true);
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
     },
-    [speakSentence]
+    [notify],
   );
 
-  // Stream the backend response using the existing SSE contract.
+  const speakWithGoogle = useCallback(
+    async (text: string, lang: string) => {
+      if (!googleVoice) {
+        browserSpeak(text, lang);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API}/speak`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, language: lang }),
+        });
+
+        if (!response.ok) throw new Error("Google voice request failed");
+
+        const data = await response.json();
+
+        if (!data.success || !data.audio_base64) {
+          throw new Error(data.message || "Google voice unavailable");
+        }
+
+        const audio = new Audio(
+          `data:${data.content_type};base64,${data.audio_base64}`,
+        );
+
+        audioRef.current = audio;
+        audio.onplay = () => setSpeaking(true);
+        audio.onended = () => setSpeaking(false);
+        audio.onerror = () => {
+          setSpeaking(false);
+          browserSpeak(text, lang);
+        };
+
+        await audio.play();
+      } catch (error) {
+        console.warn("Google TTS fallback:", error);
+        notify("Google voice unavailable. Using browser voice.");
+        browserSpeak(text, lang);
+      }
+    },
+    [googleVoice, browserSpeak, notify],
+  );
+
   const sendMessage = async (raw: string) => {
     const message = raw.trim();
 
     if (!message || sendingRef.current) return;
 
-    if (!backendOnline) {
-      notify("MANAV backend is offline. Start FastAPI first.");
+    if (!online) {
+      notify("MANAV backend is offline.");
       return;
     }
 
     const previous = messagesRef.current;
+
+    // Never send empty streaming placeholders to FastAPI.
+    const cleanHistory = previous
+      .filter((item) => item.content.trim().length > 0)
+      .slice(-10)
+      .map((item) => ({
+        role: item.role === "user" ? "user" : "model",
+        content: item.content.trim(),
+      }));
 
     const updated: Message[] = [
       ...previous,
@@ -276,19 +283,13 @@ export default function Home() {
     setCommand("");
     setSending(true);
     sendingRef.current = true;
-    setActiveSection("COMMAND");
-
-    speechStoppedRef.current = false;
-    speechBufferRef.current = "";
-
-    window.speechSynthesis?.cancel();
-    setSpeaking(false);
+    stopVoice();
 
     const controller = new AbortController();
     controllerRef.current = controller;
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/chat", {
+      const response = await fetch(`${API}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -296,39 +297,39 @@ export default function Home() {
         },
         body: JSON.stringify({
           message,
-          history: previous.slice(-10),
+          history: cleanHistory,
+          preferred_language: language,
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         let detail = "The AI request could not be completed.";
-
         try {
           const data = await response.json();
-
-          if (typeof data.detail === "string") {
+          if (Array.isArray(data.detail)) {
+            detail = data.detail
+              .map((item: { msg?: string }) => item.msg || "")
+              .join(", ");
+          } else if (typeof data.detail === "string") {
             detail = data.detail;
           }
         } catch {
-          // Keep the default error message.
+          // Keep fallback error.
         }
-
         throw new Error(detail);
       }
 
-      if (!response.body) {
-        throw new Error("Streaming is unavailable.");
-      }
+      if (!response.body) throw new Error("Streaming is unavailable.");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-
       let buffer = "";
       let fullReply = "";
-      let finished = false;
+      let responseLanguage = "en";
+      let completed = false;
 
-      const handleEvent = (eventText: string) => {
+      const processEvent = (eventText: string) => {
         const lines = eventText.split(/\r?\n/);
         let eventName = "message";
         const dataLines: string[] = [];
@@ -336,102 +337,99 @@ export default function Home() {
         for (const line of lines) {
           if (line.startsWith("event:")) {
             eventName = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
+          }
+          if (line.startsWith("data:")) {
             dataLines.push(line.slice(5).trim());
           }
         }
 
         if (!dataLines.length) return;
 
-        const payload = JSON.parse(dataLines.join("\n")) as {
-          text?: string;
-          message?: string;
-          response_time_seconds?: number;
-        };
+        const payload = JSON.parse(dataLines.join("\n"));
 
-        if (
-          eventName === "chunk" &&
-          typeof payload.text === "string"
-        ) {
+        if (eventName === "chunk" && typeof payload.text === "string") {
           fullReply += payload.text;
 
-          const nextMessages: Message[] = [
+          const next = [
             ...updated.slice(0, -1),
-            { role: "model", content: fullReply },
+            {
+              role: "model" as const,
+              content: fullReply,
+              language: responseLanguage,
+            },
           ];
 
-          messagesRef.current = nextMessages;
-          setMessages(nextMessages);
-
-          processSpeech(payload.text);
+          messagesRef.current = next;
+          setMessages(next);
         }
 
         if (eventName === "done") {
-          finished = true;
-          processSpeech("", true);
+          completed = true;
+          responseLanguage = payload.language || "en";
+          setLastLanguage(responseLanguage);
 
           if (typeof payload.response_time_seconds === "number") {
-            setLastResponseTime(payload.response_time_seconds);
+            setLatency(payload.response_time_seconds);
           }
         }
 
         if (eventName === "error") {
-          throw new Error(
-            payload.message || "MANAV encountered an error."
-          );
+          throw new Error(payload.message || "MANAV encountered an error.");
         }
       };
 
       while (true) {
         const { value, done } = await reader.read();
-
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
         const events = buffer.split(/\r?\n\r?\n/);
-        buffer = events.pop() ?? "";
+        buffer = events.pop() || "";
 
-        for (const eventText of events) {
-          handleEvent(eventText);
-        }
+        for (const event of events) processEvent(event);
       }
 
       buffer += decoder.decode();
-
-      if (buffer.trim()) {
-        handleEvent(buffer);
-      }
-
-      if (!finished) {
-        processSpeech("", true);
-      }
+      if (buffer.trim()) processEvent(buffer);
 
       if (!fullReply.trim()) {
         throw new Error("MANAV returned an empty response.");
       }
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        return;
+
+      if (!completed) {
+        responseLanguage =
+          language === "auto" ? "en" : language;
       }
 
-      const detail =
-        error instanceof Error
-          ? error.message
-          : "Unable to reach MANAV.";
-
-      const errorMessages: Message[] = [
+      const finalMessages = [
         ...updated.slice(0, -1),
         {
-          role: "model",
+          role: "model" as const,
+          content: fullReply,
+          language: responseLanguage,
+        },
+      ];
+
+      messagesRef.current = finalMessages;
+      setMessages(finalMessages);
+
+      await speakWithGoogle(fullReply, responseLanguage);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+
+      const detail =
+        error instanceof Error ? error.message : "Unable to reach MANAV.";
+
+      const failed = [
+        ...updated.slice(0, -1),
+        {
+          role: "model" as const,
           content: `I couldn't complete that request. ${detail}`,
         },
       ];
 
-      messagesRef.current = errorMessages;
-      setMessages(errorMessages);
-
-      speechBufferRef.current = "";
+      messagesRef.current = failed;
+      setMessages(failed);
       notify(detail);
     } finally {
       setSending(false);
@@ -440,47 +438,33 @@ export default function Home() {
     }
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void sendMessage(command);
+  const stopGeneration = () => {
+    controllerRef.current?.abort();
+    stopVoice();
+    sendingRef.current = false;
+    setSending(false);
   };
 
-  const handleKeyDown = (
-    event: KeyboardEvent<HTMLTextAreaElement>
-  ) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void sendMessage(command);
-    }
-  };
-
-  const stopSpeaking = () => {
-    speechStoppedRef.current = true;
-    speechBufferRef.current = "";
-
-    window.speechSynthesis?.cancel();
-    setSpeaking(false);
-  };
-
-  // Browser microphone recognition.
-  const startListening = (mode: "push" | "wake") => {
+  const startListening = (wakeMode: boolean) => {
     const speechWindow = window as Window & {
       SpeechRecognition?: RecognitionConstructor;
       webkitSpeechRecognition?: RecognitionConstructor;
     };
 
     const Constructor =
-      speechWindow.SpeechRecognition ??
+      speechWindow.SpeechRecognition ||
       speechWindow.webkitSpeechRecognition;
 
     if (!Constructor) {
-      notify("Speech recognition is unavailable. Use Chrome.");
+      notify("Speech recognition is unavailable. Try Chrome.");
       return;
     }
 
     if (!recognitionRef.current) {
       const recognition = new Constructor();
 
+      // Browser recognition language is selected here.
+      // Browser support for automatic multilingual recognition varies.
       recognition.lang = "en-IN";
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -489,100 +473,81 @@ export default function Home() {
         let transcript = "";
 
         for (
-          let i = event.resultIndex;
-          i < event.results.length;
-          i += 1
+          let index = event.resultIndex;
+          index < event.results.length;
+          index += 1
         ) {
-          if (event.results[i].isFinal) {
-            transcript += event.results[i][0].transcript + " ";
+          if (event.results[index].isFinal) {
+            transcript += event.results[index][0].transcript + " ";
           }
         }
 
         const spoken = transcript.trim();
-
         if (!spoken) return;
 
-        if (listeningModeRef.current === "push") {
-          setCommand(spoken);
+        if (!wakeMode) {
           void sendMessage(spoken);
-          recognitionRef.current?.stop();
+          recognition.stop();
           return;
         }
 
-        if (listeningModeRef.current === "wake") {
-          const match = spoken.match(/hey\s+manav[,.!\s]*/i);
+        const match = spoken.match(/hey\s+manav[,.!\s]*/i);
 
-          if (match) {
-            const remaining = spoken
-              .slice(match.index! + match[0].length)
-              .trim();
+        if (match) {
+          const remainder = spoken
+            .slice(match.index! + match[0].length)
+            .trim();
 
-            if (remaining) {
-              wakeArmedRef.current = false;
-              void sendMessage(remaining);
-            } else {
-              wakeArmedRef.current = true;
-              setVoiceStatus("MANAV IS LISTENING");
-            }
-          } else if (wakeArmedRef.current) {
+          if (remainder) {
             wakeArmedRef.current = false;
-            void sendMessage(spoken);
+            void sendMessage(remainder);
+          } else {
+            wakeArmedRef.current = true;
+            notify("MANAV is listening. Speak your command.");
           }
+        } else if (wakeArmedRef.current) {
+          wakeArmedRef.current = false;
+          void sendMessage(spoken);
         }
       };
 
       recognition.onerror = (event) => {
         if (event.error === "not-allowed") {
-          restartRecognitionRef.current = false;
+          restartWakeRef.current = false;
           wakeEnabledRef.current = false;
-
           setWakeEnabled(false);
           setListening(false);
-
-          notify("Allow microphone permission in Chrome.");
+          notify("Allow microphone access in your browser.");
         }
       };
 
       recognition.onend = () => {
-        if (
-          restartRecognitionRef.current &&
-          wakeEnabledRef.current
-        ) {
+        if (restartWakeRef.current && wakeEnabledRef.current) {
           window.setTimeout(() => {
             try {
               recognition.start();
             } catch {
-              // Browser may still be closing the previous session.
+              // Recognition may still be closing.
             }
-          }, 400);
+          }, 500);
         } else {
           setListening(false);
-
-          if (!wakeEnabledRef.current) {
-            setVoiceStatus("SYSTEM STANDBY");
-          }
         }
       };
 
       recognitionRef.current = recognition;
     }
 
-    listeningModeRef.current = mode;
-
-    if (mode === "wake") {
-      wakeEnabledRef.current = true;
-      restartRecognitionRef.current = true;
-
-      setWakeEnabled(true);
-      setVoiceStatus('SAY "HEY MANAV"');
-    } else {
-      wakeEnabledRef.current = false;
-      restartRecognitionRef.current = false;
-
-      setVoiceStatus("LISTENING TO YOUR VOICE");
-    }
-
     try {
+      if (wakeMode) {
+        wakeEnabledRef.current = true;
+        restartWakeRef.current = true;
+        setWakeEnabled(true);
+      } else {
+        wakeEnabledRef.current = false;
+        restartWakeRef.current = false;
+      }
+
       recognitionRef.current.start();
       setListening(true);
     } catch {
@@ -591,815 +556,423 @@ export default function Home() {
   };
 
   const stopListening = () => {
-    restartRecognitionRef.current = false;
+    restartWakeRef.current = false;
     wakeEnabledRef.current = false;
     wakeArmedRef.current = false;
-    listeningModeRef.current = null;
-
     setWakeEnabled(false);
     setListening(false);
-    setVoiceStatus("SYSTEM STANDBY");
-
     recognitionRef.current?.stop();
   };
 
-  const toggleWake = () => {
-    if (wakeEnabled) {
-      stopListening();
-    } else {
-      startListening("wake");
-    }
+  const clearConversation = () => {
+    if (sendingRef.current) stopGeneration();
+    stopVoice();
+    messagesRef.current = [];
+    setMessages([]);
+    setCommand("");
   };
 
-  const handlePushToTalk = () => {
-    if (listening && !wakeEnabled) {
-      stopListening();
-      return;
+  const copyMessage = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify("Copied to clipboard.");
+    } catch {
+      notify("Clipboard is unavailable.");
     }
-
-    if (wakeEnabled) {
-      stopListening();
-    }
-
-    startListening("push");
   };
 
   useEffect(() => {
     return () => {
-      restartRecognitionRef.current = false;
-      recognitionRef.current?.abort();
       controllerRef.current?.abort();
+      recognitionRef.current?.abort();
       window.speechSynthesis?.cancel();
-
-      if (noticeTimerRef.current) {
-        clearTimeout(noticeTimerRef.current);
-      }
+      audioRef.current?.pause();
     };
   }, []);
 
-  const systemState = listening
-    ? "LISTENING"
-    : speaking
-      ? "SPEAKING"
-      : sending
-        ? "PROCESSING"
-        : "STANDBY";
-
-  const hologramClass = [
-    "hologram",
-    listening ? "hologram-listening" : "",
-    sending ? "hologram-thinking" : "",
-    speaking ? "hologram-speaking" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const navClick = (name: string) => {
-    setActiveSection(name);
-    setSidebarOpen(false);
-
-    if (name !== "COMMAND") {
-      notify(`${name} module is not integrated yet.`);
-    }
-  };
-
   return (
-    <main className="manav-background min-h-screen overflow-hidden text-white">
-      <div className="hud-grid fixed inset-0 pointer-events-none" />
-      <div className="scanlines fixed inset-0 pointer-events-none" />
+    <main className="nexus-app">
+      <div className="nexus-grid" />
+      <div className="nexus-noise" />
 
-      <div className="ambient-orb ambient-orb-one" />
-      <div className="ambient-orb ambient-orb-two" />
-      <div className="ambient-orb ambient-orb-three" />
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">M</div>
+          <div className="brand-text">
+            <strong>MANAV®</strong>
+            <small>PERSONAL INTELLIGENCE</small>
+          </div>
+        </div>
 
-      <div className="app-shell">
-        <AnimatePresence>
-          {sidebarOpen && (
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSidebarOpen(false)}
-              className="sidebar-backdrop"
-              aria-label="Close sidebar"
-            />
-          )}
-        </AnimatePresence>
+        <div className="sidebar-overline">WORKSPACE</div>
+        <div className="navigation">
+          <div className="nav-link active">
+            <BrainCircuit size={17} />
+            <span>Command centre</span>
+          </div>
+        </div>
 
-        {/* LEFT NAVIGATION */}
-        <aside
-          className={`manav-sidebar ${
-            sidebarOpen ? "sidebar-open" : ""
-          }`}
-        >
-          <div className="brand-lockup">
-            <div className="brand-symbol">
-              <span>M</span>
-              <i />
-            </div>
+        <div className="sidebar-overline">LANGUAGE ENGINE</div>
+        <div className="unit-list">
+          {supportedLanguages
+            .filter((item) => item.value !== "auto")
+            .map((item) => (
+              <div className="unit-item" key={item.value}>
+                <div className="unit-icon">
+                  <Globe2 size={15} />
+                </div>
+                <div className="unit-copy">
+                  <strong>{item.label}</strong>
+                  <span>Multilingual support</span>
+                </div>
+                <span className="unit-pending" />
+              </div>
+            ))}
+        </div>
 
+        <div className="sidebar-bottom">
+          <div className="privacy-card">
+            <Shield size={17} />
             <div>
-              <div className="brand-name">MANAV</div>
-              <div className="brand-caption">
-                PERSONAL INTELLIGENCE
-              </div>
+              <strong>PRIVATE SESSION</strong>
+              <span>Local frontend connection</span>
             </div>
-
-            <button
-              className="sidebar-close"
-              onClick={() => setSidebarOpen(false)}
-              aria-label="Close menu"
-            >
-              <X size={17} />
-            </button>
+            <Check size={14} />
           </div>
-
-          <div className="sidebar-label">WORKSPACE</div>
-
-          <nav className="nav-stack">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = activeSection === item.name;
-
-              return (
-                <button
-                  key={item.name}
-                  onClick={() => navClick(item.name)}
-                  className={`nav-item ${
-                    active ? "nav-item-active" : ""
-                  }`}
-                >
-                  <Icon size={16} />
-                  <span>{item.name}</span>
-                  {active && (
-                    <span className="nav-active-indicator" />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="sidebar-label agents-label">
-            INTELLIGENCE UNITS
+          <div className="sidebar-build">
+            <span>MANAV NEXUS</span>
+            <span>BUILD 0.9.0</span>
           </div>
+        </div>
+      </aside>
 
-          <div className="agent-list">
-            {agents.map((agent, index) => {
-              const Icon = agent.icon;
-
-              return (
-                <motion.div
-                  key={agent.name}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.07 }}
-                  className="sidebar-agent"
-                >
-                  <div className="agent-icon">
-                    <Icon size={15} />
-                  </div>
-
-                  <div className="agent-copy">
-                    <p>{agent.name}</p>
-                    <span>{agent.detail}</span>
-                  </div>
-
-                  <span className="agent-status" />
-                </motion.div>
-              );
-            })}
+      <section className="main-area">
+        <header className="topbar">
+          <div className="breadcrumb">
+            <span>MANAV</span>
+            <i>/</i>
+            <strong>COMMAND CENTRE</strong>
           </div>
+          <div className="topbar-right">
+            <div className={`connection-pill ${online ? "connected" : "disconnected"}`}>
+              <span className="connection-light" />
+              {online ? "CORE CONNECTED" : "CORE DISCONNECTED"}
+            </div>
+            <div className="profile-chip">A</div>
+          </div>
+        </header>
 
-          <div className="sidebar-bottom">
-            <div className="security-panel">
-              <Shield size={16} />
-
+        <div className="workspace">
+          <section className="welcome-row">
+            <div>
+              <div className="section-kicker">
+                <span /> MULTILINGUAL INTELLIGENCE SYSTEM · 001
+              </div>
+              <h1>Good to see you, <em>Aryan.</em></h1>
+              <p>One intelligence. Multiple languages. Natural conversations.</p>
+            </div>
+            <div className="session-stamp">
+              <Activity size={16} />
               <div>
-                <p>LOCAL SESSION</p>
-                <span>Permission-based access</span>
+                <strong>SESSION ACTIVE</strong>
+                <small>LOCAL ENVIRONMENT</small>
               </div>
             </div>
+          </section>
 
-            <div className="sidebar-version">
-              MANAV OS <span>BUILD 0.3</span>
-            </div>
+          <div className="command-grid">
+            <section className="core-panel">
+              <div className="panel-heading">
+                <div><span className="panel-index">01</span> NEURAL INTERFACE</div>
+                <div className="core-state">
+                  <i /> {listening ? "LISTENING" : sending ? "PROCESSING" : speaking ? "SPEAKING" : "CORE STANDBY"}
+                </div>
+              </div>
+
+              <div className={`reactor ${sending ? "reactor-processing" : ""}`}>
+                <div className="reactor-aura" />
+                <div className="reactor-grid" />
+                <div className="reactor-ring ring-outer"><i /><b /></div>
+                <div className="reactor-ring ring-middle"><i /><b /></div>
+                <div className="reactor-ring ring-inner"><i /></div>
+                <div className="reactor-sweep" />
+                <div className="reactor-core">
+                  <div className="core-glass" />
+                  <div className="core-inner">
+                    <span className="core-overline">NEXUS</span>
+                    <strong>M</strong>
+                    <span className="core-subline">INTELLIGENCE CORE</span>
+                  </div>
+                </div>
+                <div className="reactor-caption">
+                  <i /> {listening ? "Listening to your voice" : sending ? "Receiving streamed intelligence" : speaking ? "Voice output active" : "Ready for your next instruction"}
+                </div>
+              </div>
+
+              <div className="core-status-strip">
+                <div className="status-cell">
+                  <BrainCircuit size={16} />
+                  <div><small>INTELLIGENCE</small><strong>{sending ? "PROCESSING" : "READY"}</strong></div>
+                </div>
+                <div className="status-cell">
+                  <Wifi size={16} />
+                  <div><small>BACKEND LINK</small><strong>{online ? "CONNECTED" : "OFFLINE"}</strong></div>
+                </div>
+                <div className="status-cell">
+                  <AudioLines size={16} />
+                  <div><small>VOICE CHANNEL</small><strong>{speaking ? "ACTIVE" : "STANDBY"}</strong></div>
+                </div>
+              </div>
+            </section>
+
+            <aside className="telemetry-panel">
+              <div className="panel-heading">
+                <div><span className="panel-index">02</span> SYSTEM TELEMETRY</div>
+                <Activity size={15} />
+              </div>
+
+              <div className="telemetry-summary">
+                <div className="telemetry-summary-top">
+                  <span>CORE STATUS</span>
+                  <span>{online ? "ONLINE" : "OFFLINE"}</span>
+                </div>
+                <div className="telemetry-summary-main">
+                  <strong>{online ? "01" : "00"}</strong>
+                  <span>/ 01<br />API LINK</span>
+                </div>
+                <div className="telemetry-meter">
+                  <i style={{ width: online ? "100%" : "4%" }} />
+                </div>
+                <small>{online ? "FastAPI endpoint responding" : "Waiting for local API"}</small>
+              </div>
+
+              <div className="telemetry-list">
+                <div className="telemetry-row">
+                  <Radio size={15} />
+                  <div><strong>LANGUAGE</strong><small>{languageNames[lastLanguage] || lastLanguage}</small></div>
+                  <i className="dot dot-green" />
+                </div>
+                <div className="telemetry-row">
+                  <Volume2 size={15} />
+                  <div><strong>VOICE ENGINE</strong><small>{googleVoice ? "Google Cloud + fallback" : "Browser voice"}</small></div>
+                  <i className="dot dot-green" />
+                </div>
+                <div className="telemetry-row">
+                  <Mic size={15} />
+                  <div><strong>VOICE INPUT</strong><small>{listening ? "Microphone active" : "Microphone standby"}</small></div>
+                  <i className={listening ? "dot dot-green" : "dot"} />
+                </div>
+              </div>
+
+              <div className="telemetry-bottom">
+                <div className="telemetry-bottom-label">RESPONSE LATENCY</div>
+                <strong>{latency !== null ? `${latency.toFixed(2)}s` : "— —"}</strong>
+                <small>Last completed Gemini response</small>
+              </div>
+            </aside>
           </div>
-        </aside>
 
-        {/* MAIN CONTENT */}
-        <section className="main-column">
-          <header className="topbar">
-            <div className="topbar-left">
-              <button
-                className="mobile-menu"
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open menu"
+          <section className="command-deck">
+            <div className="deck-topline">
+              <div><span className="panel-index">03</span> COMMAND DECK</div>
+              <div className="deck-encryption"><Shield size={12} /> PRIVATE SESSION</div>
+            </div>
+
+            <div className="language-row">
+              <label htmlFor="language">RESPONSE LANGUAGE</label>
+              <select
+                id="language"
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as Language)}
               >
-                <Menu size={20} />
-              </button>
+                {supportedLanguages.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
 
-              <div>
-                <div className="eyebrow">
-                  MANAV / CENTRAL INTELLIGENCE
-                </div>
-
-                <div className="topbar-title">
-                  Personal AI Command Centre
-                </div>
-              </div>
-            </div>
-
-            <div className="topbar-right">
-              <div className="system-connection">
-                <span
-                  className={`status-dot ${
-                    backendOnline
-                      ? "status-online"
-                      : "status-offline"
-                  }`}
+              <label className="voice-toggle">
+                <input
+                  type="checkbox"
+                  checked={googleVoice}
+                  onChange={(event) => setGoogleVoice(event.target.checked)}
                 />
+                Google premium voice
+              </label>
+            </div>
 
-                <span>
-                  {checking
-                    ? "CONNECTING"
-                    : backendOnline
-                      ? "SYSTEM ONLINE"
-                      : "SYSTEM OFFLINE"}
-                </span>
+            <form
+              className="composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void sendMessage(command);
+              }}
+            >
+              <div className="composer-leading"><Sparkles size={18} /></div>
+              <textarea
+                value={command}
+                onChange={(event) => setCommand(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void sendMessage(command);
+                  }
+                }}
+                placeholder="Give MANAV an instruction..."
+                rows={2}
+                disabled={sending}
+                aria-label="Message MANAV"
+              />
+              <div className="composer-actions">
+                <span className="composer-hint">ENTER TO SEND · SHIFT + ENTER FOR NEW LINE</span>
+                {sending ? (
+                  <button className="send-button stop-button" type="button" onClick={stopGeneration}>
+                    <Square size={15} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button className="send-button" type="submit" disabled={!command.trim()}>
+                    <Send size={17} />
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <div className="deck-toolbar">
+              <div className="voice-controls">
+                <button
+                  type="button"
+                  className={`mic-control ${listening ? "mic-active" : ""}`}
+                  onClick={() => listening ? stopListening() : startListening(false)}
+                >
+                  {listening ? <MicOff size={15} /> : <Mic size={15} />}
+                  {listening ? "STOP LISTENING" : "VOICE INPUT"}
+                </button>
+
+                <button
+                  type="button"
+                  className={`wake-control ${wakeEnabled ? "wake-active" : ""}`}
+                  onClick={() => {
+                    if (wakeEnabled) stopListening();
+                    else startListening(true);
+                  }}
+                >
+                  <Radio size={14} />
+                  {wakeEnabled ? "WAKE ON" : "WAKE PHRASE"}
+                </button>
               </div>
 
-              <div className="profile-orb">A</div>
+              <div className="voice-profile">
+                <Volume2 size={14} />
+                <span>VOICE</span>
+                <strong>GOOGLE MULTILINGUAL</strong>
+                {speaking && (
+                  <button type="button" onClick={stopVoice} title="Stop voice">
+                    <VolumeX size={14} />
+                  </button>
+                )}
+              </div>
             </div>
-          </header>
 
-          <div className="workspace">
-            <div className="workspace-heading">
+            <div className="deck-footnote">
+              <span><i /> {wakeEnabled ? 'WAKE PHRASE ACTIVE · SAY "HEY MANAV"' : "AUTOMATIC LANGUAGE DETECTION AVAILABLE"}</span>
+              <button type="button" onClick={clearConversation}>
+                <Plus size={13} /> NEW SESSION
+              </button>
+            </div>
+          </section>
+
+          <section className="conversation-section">
+            <div className="conversation-heading">
               <div>
-                <div className="eyebrow accent-eyebrow">
-                  PERSONAL INTELLIGENCE / 001
-                </div>
-
-                <h1>
-                  Good evening, <span>Aryan.</span>
-                </h1>
-
-                <p>
-                  Your intelligence environment is standing by.
-                </p>
+                <div className="section-kicker"><span /> INTERACTION LOG</div>
+                <h2>{messages.length ? "Conversation" : "Start a conversation"}</h2>
               </div>
-
-              <div className="live-indicator">
-                <span className="live-pulse" />
-                LIVE SYSTEM MONITORING
-              </div>
+              {messages.length > 0 && (
+                <button className="clear-button" type="button" onClick={clearConversation}>
+                  <Plus size={14} /> NEW SESSION
+                </button>
+              )}
             </div>
 
-            <div className="command-layout">
-              {/* CENTRAL AI CORE */}
-              <section className="central-stage">
-                <div className="stage-topline">
-                  <span>CORE INTELLIGENCE</span>
-
-                  <span className="stage-state">
-                    <i /> MK · 001 / {systemState}
-                  </span>
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-icon"><Sparkles size={19} /></div>
+                <div className="empty-state-copy">
+                  <strong>Your next idea starts here.</strong>
+                  <span>MANAV can converse in 11 supported language modes.</span>
                 </div>
-
-                {/* HOLOGRAPHIC REACTOR */}
-                <div className={hologramClass}>
-                  <div className="holo-aura" />
-
-                  <div className="holo-orbit holo-orbit-one" />
-                  <div className="holo-orbit holo-orbit-two" />
-                  <div className="holo-orbit holo-orbit-three" />
-                  <div className="holo-orbit holo-orbit-four" />
-                  <div className="holo-orbit holo-orbit-five" />
-
-                  <div className="holo-scan" />
-
-                  <div className="holo-particles">
-                    {Array.from({ length: 24 }).map((_, i) => (
-                      <span
-                        key={i}
-                        style={{ "--i": i } as CSSProperties}
-                      />
-                    ))}
-                  </div>
-
-                  <motion.div
-                    className="holo-core"
-                    animate={{
-                      scale:
-                        listening || speaking
-                          ? [1, 1.065, 1]
-                          : [1, 1.025, 1],
-                    }}
-                    transition={{
-                      duration:
-                        listening || speaking ? 1.1 : 4,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                    }}
+                <div className="prompt-grid">
+                  {[
+                    "Explain artificial intelligence from first principles.",
+                    "Help me plan and build a software project.",
+                    "Help me write a Python program.",
+                    "Aaj mujhe ek naya concept samjhao.",
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="prompt-card"
+                      onClick={() => setCommand(prompt)}
+                    >
+                      <Sparkles size={15} />
+                      <strong>{prompt}</strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="message-list">
+                {messages.map((message, index) => (
+                  <article
+                    key={`${index}-${message.role}`}
+                    className={`message-row ${message.role === "user" ? "message-user" : "message-model"}`}
                   >
-                    <div className="core-glass" />
-
-                    <div className="holo-core-inner">
-                      <Sparkles size={25} />
-                      <span className="core-letter">M</span>
-                      <span className="core-word">MANAV</span>
+                    <div className="message-avatar">
+                      {message.role === "user" ? "A" : <Sparkles size={16} />}
                     </div>
-                  </motion.div>
-
-                  <div className="holo-caption">
-                    <span className="holo-caption-dot" />
-                    {systemState}
-                  </div>
-                </div>
-
-                {/* DYNAMIC STATUS */}
-                <div className="stage-message">
-                  <h2>
-                    {listening
-                      ? "I'm listening."
-                      : sending
-                        ? "Processing intelligence."
-                        : speaking
-                          ? "Speaking with you."
-                          : "At your command."}
-                  </h2>
-
-                  <p>
-                    {listening
-                      ? "Your voice input is being captured."
-                      : sending
-                        ? "Your request is moving through the intelligence stream."
-                        : "Intelligence is not just a response. It is a system ready to work with you."}
-                  </p>
-                </div>
-
-                {/* VOICE VISUALIZER */}
-                <div
-                  className={`voice-visualizer ${
-                    listening ? "visualizer-active" : ""
-                  } ${
-                    speaking ? "visualizer-speaking" : ""
-                  }`}
-                >
-                  {bars.map((bar) => (
-                    <motion.span
-                      key={bar}
-                      animate={
-                        listening || speaking
-                          ? {
-                              height: [
-                                5,
-                                9 + ((bar * 13) % 34),
-                                7 + ((bar * 7) % 25),
-                                5,
-                              ],
-                            }
-                          : {
-                              height: 4 + ((bar * 5) % 9),
-                            }
-                      }
-                      transition={{
-                        duration: 0.55 + (bar % 5) * 0.12,
-                        repeat:
-                          listening || speaking
-                            ? Infinity
-                            : 0,
-                        delay: (bar % 11) * 0.025,
-                        ease: "easeInOut",
-                      }}
-                    />
-                  ))}
-                </div>
-
-                {/* CHAT */}
-                <div className="chat-window">
-                  {messages.length === 0 ? (
-                    <div className="empty-chat">
-                      <div className="empty-chat-icon">
-                        <AudioLines size={17} />
+                    <div className="message-body">
+                      <div className="message-meta">
+                        <strong>{message.role === "user" ? "YOU" : "MANAV"}</strong>
+                        <span>{message.role === "user" ? "COMMAND INPUT" : languageNames[message.language || lastLanguage] || "AI RESPONSE"}</span>
+                        {message.role === "model" && message.content && (
+                          <button
+                            type="button"
+                            className="copy-button"
+                            onClick={() => void copyMessage(message.content)}
+                            aria-label="Copy response"
+                          >
+                            <Copy size={13} />
+                          </button>
+                        )}
                       </div>
-
-                      <p className="empty-title">
-                        Your conversation starts here
-                      </p>
-
-                      <span>
-                        Send a command or speak to MANAV.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="message-list">
-                      {messages.map((message, index) => (
-                        <motion.div
-                          key={`${index}-${message.role}`}
-                          initial={{ opacity: 0, y: 9 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className={`chat-message ${
-                            message.role === "user"
-                              ? "chat-user"
-                              : "chat-model"
-                          }`}
-                        >
-                          <div className="chat-avatar">
-                            {message.role === "user" ? "A" : "M"}
-                          </div>
-
-                          <div className="message-body">
-                            <div className="message-meta">
-                              {message.role === "user"
-                                ? "YOU"
-                                : "MANAV"}
-                            </div>
-
-                            <p>
-                              {message.content ||
-                                (sending ? "Thinking…" : "")}
-                            </p>
-                          </div>
-                        </motion.div>
-                      ))}
-
-                      <div ref={chatEndRef} />
-                    </div>
-                  )}
-                </div>
-
-                {/* COMMAND INPUT */}
-                <form
-                  className="input-console"
-                  onSubmit={handleSubmit}
-                >
-                  <textarea
-                    value={command}
-                    onChange={(event) =>
-                      setCommand(event.target.value)
-                    }
-                    onKeyDown={handleKeyDown}
-                    placeholder="Give MANAV a command..."
-                    rows={2}
-                    disabled={sending}
-                    aria-label="Message MANAV"
-                  />
-
-                  <div className="input-console-bottom">
-                    <div className="input-hint">
-                      <span className="keyboard-key">↵</span>
-                      SEND
-                      <span className="hint-divider" />
-                      <span>SHIFT + ENTER FOR NEW LINE</span>
-                    </div>
-
-                    <button
-                      className="send-button"
-                      type="submit"
-                      disabled={!command.trim() || sending}
-                      aria-label="Send message"
-                    >
-                      {sending ? (
-                        <CircleStop size={17} />
-                      ) : (
-                        <ArrowUp size={19} />
-                      )}
-                    </button>
-                  </div>
-                </form>
-
-                {/* VOICE CONTROLS */}
-                <div className="voice-settings">
-                  <div className="voice-controls">
-                    <button
-                      className={`control-chip ${
-                        listening && !wakeEnabled
-                          ? "control-chip-active"
-                          : ""
-                      }`}
-                      onClick={handlePushToTalk}
-                      type="button"
-                    >
-                      <Mic size={14} />
-
-                      {listening && !wakeEnabled
-                        ? "STOP LISTENING"
-                        : "PUSH TO TALK"}
-                    </button>
-
-                    <button
-                      className={`control-chip ${
-                        wakeEnabled ? "control-chip-active" : ""
-                      }`}
-                      onClick={toggleWake}
-                      type="button"
-                    >
-                      <Radio size={14} />
-
-                      {wakeEnabled
-                        ? "WAKE WORD ON"
-                        : "HEY MANAV"}
-                    </button>
-
-                    {speaking && (
-                      <button
-                        className="control-chip stop-chip"
-                        onClick={stopSpeaking}
-                        type="button"
-                      >
-                        <Volume2 size={14} />
-                        STOP VOICE
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="voice-mode-switch">
-                    <button
-                      type="button"
-                      className={
-                        voiceMode === "natural" ? "selected" : ""
-                      }
-                      onClick={() => setVoiceMode("natural")}
-                    >
-                      NATURAL
-                    </button>
-
-                    <button
-                      type="button"
-                      className={
-                        voiceMode === "jarvis" ? "selected" : ""
-                      }
-                      onClick={() => setVoiceMode("jarvis")}
-                    >
-                      JARVIS
-                    </button>
-                  </div>
-                </div>
-
-                {/* QUICK PROMPTS */}
-                <div className="quick-actions">
-                  {suggestions.map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => void sendMessage(suggestion)}
-                    >
-                      <Sparkles size={12} />
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              {/* RIGHT INTELLIGENCE RAIL */}
-              <aside className="intelligence-rail">
-                <div className="rail-heading">
-                  <div>
-                    <div className="eyebrow">SYSTEM OVERVIEW</div>
-                    <h3>Live telemetry</h3>
-                  </div>
-
-                  <div className="rail-icon">
-                    <Activity size={17} />
-                  </div>
-                </div>
-
-                {/* TELEMETRY */}
-                <div className="telemetry-panel">
-                  <div className="telemetry-row">
-                    <div className="telemetry-icon">
-                      <Cpu size={15} />
-                    </div>
-
-                    <div className="telemetry-copy">
-                      <p>AI CORE</p>
-                      <span>
-                        {sending
-                          ? "Generating response"
-                          : "Ready for requests"}
-                      </span>
-                    </div>
-
-                    <i
-                      className={`telemetry-dot ${
-                        backendOnline ? "online" : ""
-                      }`}
-                    />
-                  </div>
-
-                  <div className="telemetry-row">
-                    <div className="telemetry-icon">
-                      <Wifi size={15} />
-                    </div>
-
-                    <div className="telemetry-copy">
-                      <p>BACKEND LINK</p>
-                      <span>
-                        {checking
-                          ? "Checking connection"
-                          : backendOnline
-                            ? "FastAPI connected"
-                            : "Connection unavailable"}
-                      </span>
-                    </div>
-
-                    <i
-                      className={`telemetry-dot ${
-                        backendOnline ? "online" : ""
-                      }`}
-                    />
-                  </div>
-
-                  <div className="telemetry-row">
-                    <div className="telemetry-icon">
-                      <Mic size={15} />
-                    </div>
-
-                    <div className="telemetry-copy">
-                      <p>VOICE INPUT</p>
-                      <span>
-                        {listening
-                          ? voiceStatus
-                          : "Microphone standby"}
-                      </span>
-                    </div>
-
-                    <i
-                      className={`telemetry-dot ${
-                        listening ? "online" : ""
-                      }`}
-                    />
-                  </div>
-
-                  <div className="telemetry-row">
-                    <div className="telemetry-icon">
-                      <Volume2 size={15} />
-                    </div>
-
-                    <div className="telemetry-copy">
-                      <p>VOICE OUTPUT</p>
-                      <span>
-                        {speaking
-                          ? "Speech synthesis active"
-                          : "Audio standby"}
-                      </span>
-                    </div>
-
-                    <i
-                      className={`telemetry-dot ${
-                        speaking ? "online" : ""
-                      }`}
-                    />
-                  </div>
-
-                  <div className="telemetry-row">
-                    <div className="telemetry-icon">
-                      <Database size={15} />
-                    </div>
-
-                    <div className="telemetry-copy">
-                      <p>MEMORY SYSTEM</p>
-                      <span>Integration pending</span>
-                    </div>
-
-                    <i className="telemetry-dot" />
-                  </div>
-                </div>
-
-                {/* AGENT NETWORK */}
-                <div className="rail-section">
-                  <div className="rail-section-heading">
-                    <div>
-                      <div className="eyebrow">
-                        AUTONOMOUS UNITS
+                      <div className="message-content">
+                        {message.content || (
+                          sending && index === messages.length - 1 ? (
+                            <span className="typing-indicator">
+                              <i /><i /><i />
+                              <small>MANAV IS THINKING</small>
+                            </span>
+                          ) : null
+                        )}
                       </div>
-                      <h3>Agent network</h3>
                     </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
-                    <span className="unit-count">04 UNITS</span>
-                  </div>
+          <footer className="workspace-footer">
+            <span><i className={online ? "footer-dot online" : "footer-dot"} />{online ? "LOCAL INTELLIGENCE LINK ACTIVE" : "WAITING FOR BACKEND"}</span>
+            <span>MANAV AI · NEXUS BUILD 0.9.0</span>
+          </footer>
+        </div>
+      </section>
 
-                  <div className="rail-agent-list">
-                    {agents.map((agent) => {
-                      const Icon = agent.icon;
-
-                      return (
-                        <motion.div
-                          key={agent.name}
-                          whileHover={{ x: 4 }}
-                          className="agent-card"
-                        >
-                          <div className="agent-card-icon">
-                            <Icon size={16} />
-                          </div>
-
-                          <div className="agent-copy">
-                            <p>{agent.name}</p>
-                            <span>{agent.detail}</span>
-                          </div>
-
-                          <i className="agent-status" />
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* ACTIVITY FEED */}
-                <div className="rail-section activity-section">
-                  <div className="rail-section-heading">
-                    <div>
-                      <div className="eyebrow">
-                        LIVE OPERATIONS
-                      </div>
-                      <h3>Activity feed</h3>
-                    </div>
-
-                    <Zap size={16} className="activity-zap" />
-                  </div>
-
-                  <div className="activity-entry">
-                    <span className="activity-point" />
-
-                    <div>
-                      <p>
-                        {sending
-                          ? "Generating intelligence"
-                          : speaking
-                            ? "Voice output active"
-                            : listening
-                              ? "Microphone active"
-                              : "System standing by"}
-                      </p>
-
-                      <span>
-                        {sending
-                          ? "Gemini response stream"
-                          : "MANAV core status"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="activity-entry">
-                    <span className="activity-point activity-point-muted" />
-
-                    <div>
-                      <p>Backend monitoring</p>
-                      <span>
-                        Health check · 10 second interval
-                      </span>
-                    </div>
-                  </div>
-
-                  {lastResponseTime !== null && (
-                    <div className="response-metric">
-                      <span>LAST RESPONSE</span>
-                      <strong>
-                        {lastResponseTime.toFixed(2)}s
-                      </strong>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rail-footer">
-                  <div>
-                    <Shield size={13} />
-                    <span>LOCAL SESSION PROTECTED</span>
-                  </div>
-
-                  <span>MANAV AI · 0.3</span>
-                </div>
-              </aside>
-            </div>
-
-            <footer className="workspace-footer">
-              <span>
-                <span className="footer-live-dot" />
-                {backendOnline
-                  ? "LOCAL INTELLIGENCE LINK ACTIVE"
-                  : "WAITING FOR BACKEND CONNECTION"}
-              </span>
-
-              <span>DESIGNED FOR HUMAN INTELLIGENCE</span>
-            </footer>
-          </div>
-        </section>
-      </div>
-
-      {/* NOTIFICATION */}
-      <AnimatePresence>
-        {notice && (
-          <motion.div
-            initial={{ opacity: 0, y: 18, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.96 }}
-            className="manav-notice"
-          >
-            <Sparkles size={15} />
-            {notice}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {notice && (
+        <div className="toast">
+          <Sparkles size={15} /> {notice}
+        </div>
+      )}
     </main>
   );
 }
