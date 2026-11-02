@@ -1674,3 +1674,199 @@ h3,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =========================================================
+   MANAV AI — OBSIDIAN DESIGN SYSTEM V2
+   Foundation: 01
+   ========================================================= */
+
+:root {
+  color-scheme: dark;
+
+  --background: #050609;
+  --foreground: #e8edf5;
+
+  --obsidian: #050609;
+  --surface: #0a0d13;
+  --surface-raised: #10151e;
+  --surface-overlay: #151b26;
+
+  --border-subtle: rgba(148, 163, 184, 0.09);
+  --border-strong: rgba(148, 163, 184, 0.17);
+
+  --teal: #00e5ff;
+  --cyan: #00e5ff;
+  --amethyst: #9366ff;
+  --champagne: #ffb454;
+
+  --muted: #778397;
+  --muted-bright: #a5b0c0;
+
+  --glow-cyan: 0 0 28px rgba(0, 229, 255, 0.13);
+  --glow-violet: 0 0 28px rgba(147, 102, 255, 0.13);
+
+  --font-display: "Space Grotesk", sans-serif;
+  --font-interface: "Sora", sans-serif;
+  --font-technical: "IBM Plex Mono", monospace;
+}
+
+/* Global canvas */
+
+html,
+body {
+  background: #050609;
+  color: #e8edf5;
+}
+
+body {
+  background-image:
+    radial-gradient(
+      ellipse at 12% 10%,
+      rgba(0, 229, 255, 0.035),
+      transparent 32%
+    ),
+    radial-gradient(
+      ellipse at 88% 80%,
+      rgba(147, 102, 255, 0.04),
+      transparent 35%
+    );
+}
+
+/* Main application atmosphere */
+
+.manav-background {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(0, 229, 255, 0.045),
+      transparent 35%
+    ),
+    radial-gradient(
+      circle at 90% 10%,
+      rgba(147, 102, 255, 0.045),
+      transparent 30%
+    ),
+    #050609;
+}
+
+/* Technical grid */
+
+.hud-grid {
+  background-image:
+    linear-gradient(
+      rgba(130, 160, 190, 0.025) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(130, 160, 190, 0.025) 1px,
+      transparent 1px
+    );
+
+  background-size: 42px 42px;
+  mask-image: linear-gradient(
+    to bottom,
+    black 0%,
+    rgba(0, 0, 0, 0.55) 65%,
+    transparent 100%
+  );
+}
+
+/* Sidebar */
+
+.manav-background aside {
+  background: rgba(7, 9, 14, 0.97);
+  border-color: var(--border-subtle);
+}
+
+/* Main glass surfaces */
+
+.central-stage,
+.rail-heading,
+.rail-section,
+.telemetry-panel,
+.voice-settings {
+  background:
+    linear-gradient(
+      145deg,
+      rgba(17, 22, 31, 0.88),
+      rgba(7, 10, 16, 0.96)
+    );
+
+  border-color: var(--border-subtle);
+
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.025),
+    0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+/* Command console */
+
+.input-console {
+  background:
+    linear-gradient(
+      145deg,
+      rgba(16, 21, 30, 0.98),
+      rgba(7, 10, 16, 0.99)
+    );
+
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+.input-console:focus-within {
+  border-color: rgba(0, 229, 255, 0.65);
+  box-shadow:
+    0 0 0 1px rgba(0, 229, 255, 0.08),
+    0 0 35px rgba(0, 229, 255, 0.08);
+}
+
+/* Chat window */
+
+.chat-window {
+  background: rgba(4, 7, 12, 0.92);
+  border-color: var(--border-subtle);
+}
+
+/* Technical text */
+
+.manav-mono {
+  color: var(--muted-bright);
+}
+
+/* Refined scrollbars */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #273343 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #273343;
+  border-radius: 20px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #00a9c0;
+}
+
+/* Reduced motion accessibility */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
